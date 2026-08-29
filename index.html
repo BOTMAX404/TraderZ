@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>TD Chart Terminal — Twelve Data</title>
+<style>
+  :root{
+    --bg:#0b0e11; --panel:#11161b; --panel2:#171d23; --line:#252d35;
+    --text:#e6edf3; --muted:#8c98a5; --green:#22c55e; --red:#ef4444; --yellow:#facc15;
+    --blue:#4ea1ff; --accent:#7dd3fc;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif}
+  button,input,select{font:inherit}
+  button{cursor:pointer}
+  .app{height:100vh;display:grid;grid-template-rows:48px 38px 1fr 28px;overflow:hidden}
+  .topbar{display:flex;align-items:center;gap:10px;padding:0 12px;background:#0d1116;border-bottom:1px solid var(--line)}
+  .brand{font-weight:800;letter-spacing:.3px;color:#fff;margin-right:6px}
+  .pill{height:30px;background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--text);padding:0 9px;display:flex;align-items:center;gap:7px}
+  .pill input{width:115px;background:transparent;border:0;outline:0;color:#fff}
+  .pill select{background:transparent;border:0;outline:0;color:#fff}
+  .btn{height:30px;padding:0 10px;border:1px solid var(--line);background:var(--panel);color:#dce5ee;border-radius:6px}
+  .btn:hover{background:var(--panel2)}
+  .btn.primary{border-color:#245e89;background:#113047}
+  .grow{flex:1}
+  .status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  .dot{width:7px;height:7px;border-radius:50%;background:#64748b}
+  .dot.live{background:var(--green);box-shadow:0 0 8px #22c55e}
+  .toolbar{display:flex;align-items:center;gap:5px;padding:0 10px;background:#0d1116;border-bottom:1px solid var(--line)}
+  .tf{height:25px;border:0;background:transparent;color:var(--muted);padding:0 8px;border-radius:4px}
+  .tf.active,.tf:hover{color:#fff;background:#1d252d}
+  .workspace{min-height:0;display:grid;grid-template-columns:1fr 300px}
+  .main{min-width:0;min-height:0;position:relative}
+  #chart{position:absolute;inset:0}
+  #overlay{position:absolute;inset:0;pointer-events:none}
+  .info{position:absolute;left:12px;top:10px;z-index:5;background:rgba(11,14,17,.82);border:1px solid rgba(80,90,100,.45);backdrop-filter:blur(6px);border-radius:6px;padding:7px 9px;font-size:12px;min-width:280px}
+  .info .row{display:flex;gap:9px;align-items:center}
+  .symbol{font-weight:800;color:#fff}.value{font-weight:700}.dim{color:var(--muted)}
+  .side{border-left:1px solid var(--line);background:#0e1318;overflow:auto;padding:10px}
+  .section{border:1px solid var(--line);border-radius:7px;background:#11161b;margin-bottom:10px;overflow:hidden}
+  .section h3{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:#b6c0ca;padding:9px 10px;margin:0;background:#131920;border-bottom:1px solid var(--line)}
+  .form{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}
+  label{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+  label.full{grid-column:1/-1}
+  .ctrl{height:29px;background:#0c1014;border:1px solid #2a333d;border-radius:5px;color:#fff;padding:0 7px;outline:0}
+  .check{display:flex;align-items:center;gap:7px;flex-direction:row}
+  .check input{accent-color:#22c55e}
+  .hint{font-size:10px;color:#71808e;line-height:1.45;padding:0 10px 10px}
+  .watchrow{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #1e252b}
+  .watchrow:last-child{border-bottom:0}
+  .watchsym{font-weight:700}.watchpx{font-variant-numeric:tabular-nums}.up{color:var(--green)}.down{color:var(--red)}
+  .toast{position:absolute;right:12px;bottom:12px;z-index:20;max-width:360px;background:#151c23;border:1px solid #34414d;border-radius:7px;padding:9px 11px;font-size:12px;display:none}
+  .bottom{display:flex;align-items:center;gap:14px;padding:0 10px;color:#71808e;background:#0d1116;border-top:1px solid var(--line);font-size:11px}
+  @media(max-width:900px){.workspace{grid-template-columns:1fr}.side{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand">TD Chart Terminal</div>
+    <div class="pill"><span>Symbol</span><input id="symbol" value="XAU/USD" /></div>
+    <div class="pill"><span>Interval</span>
+      <select id="interval">
+        <option value="1min">1m</option><option value="5min">5m</option><option value="15min" selected>15m</option>
+        <option value="30min">30m</option><option value="1h">1h</option><option value="2h">2h</option>
+        <option value="4h">4h</option><option value="8h">8h</option><option value="1day">1D</option>
+      </select>
+    </div>
+    <button class="btn primary" id="loadBtn">Load</button>
+    <button class="btn" id="testBtn">Test API</button>
+    <button class="btn" id="liveBtn">Live</button>
+    <div class="grow"></div>
+    <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Disconnected</span></div>
+  </div>
+
+  <div class="toolbar">
+    <button class="tf" data-tf="1min">1m</button><button class="tf" data-tf="5min">5m</button>
+    <button class="tf active" data-tf="15min">15m</button><button class="tf" data-tf="30min">30m</button>
+    <button class="tf" data-tf="1h">1h</button><button class="tf" data-tf="4h">4h</button><button class="tf" data-tf="1day">1D</button>
+    <span style="width:1px;height:18px;background:#29313a"></span>
+    <button class="btn" id="fitBtn">Fit</button>
+    <button class="btn" id="resetBtn">Reset</button>
+    <div class="grow"></div>
+    <span class="dim">Twelve Data • browser-only terminal</span>
+  </div>
+
+  <div class="workspace">
+    <div class="main">
+      <div id="chart"></div>
+      <canvas id="overlay"></canvas>
+      <div class="info" id="info">
+        <div class="row"><span class="symbol" id="infoSymbol">XAU/USD</span><span class="dim" id="infoInterval">15m</span><span id="infoPrice" class="value">—</span><span id="infoChange" class="value dim">—</span></div>
+        <div class="row" style="margin-top:4px"><span class="dim">Indicator:</span><span class="up">EMA 5</span><span>/</span><span class="up">EMA 30</span><span class="dim">+ Swing Profile + HH/HL</span></div>
+      </div>
+      <div class="toast" id="toast"></div>
+    </div>
+
+    <aside class="side">
+      <div class="section">
+        <h3>Twelve Data</h3>
+        <div class="form">
+          <label class="full">API Key
+            <input class="ctrl" id="apiKey" type="password" placeholder="Paste your Twelve Data API key" />
+          </label>
+          <label>History
+            <select class="ctrl" id="historySize"><option value="800">800</option><option value="1500" selected>1500</option><option value="3000">3000</option></select>
+          </label>
+          <label>Source
+            <select class="ctrl" id="sourceMode"><option value="xau">Forex / Metals</option><option value="stocks">Stocks</option></select>
+          </label>
+        </div>
+        <div class="hint">The key is kept in this browser only. For local use, open the included server.py instead of double-clicking the HTML; this avoids browser CORS/file:// problems.</div>
+      </div>
+
+      <div class="section">
+        <h3>Arrow Style By [ZIHAD_404] V3</h3>
+        <div class="form">
+          <label>Fast EMA <input class="ctrl" id="fastLen" type="number" min="1" value="5"></label>
+          <label>Slow EMA <input class="ctrl" id="slowLen" type="number" min="1" value="30"></label>
+          <label>ATR Length <input class="ctrl" id="atrLen" type="number" min="1" value="14"></label>
+          <label>Arrow × ATR <input class="ctrl" id="arrowDist" type="number" min=".1" step=".05" value=".50"></label>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Swing Volume Profile</h3>
+        <div class="form">
+          <label>Swing Length <input class="ctrl" id="swingLen" type="number" min="10" value="50"></label>
+          <label>Bin × ATR(200) <input class="ctrl" id="binAtr" type="number" min=".05" step=".05" value=".50"></label>
+          <label class="check"><input id="showProfile" type="checkbox" checked> Profile</label>
+          <label class="check"><input id="heatMap" type="checkbox"> HeatMap</label>
+          <label class="check"><input id="showPoc" type="checkbox" checked> PoC</label>
+          <label class="check"><input id="showSwingZz" type="checkbox" checked> ZigZag</label>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>HH / HL / LH / LL</h3>
+        <div class="form">
+          <label>Swing Length <input class="ctrl" id="majorLen" type="number" min="1" value="14"></label>
+          <label>Max Trend Lines <input class="ctrl" id="maxTrendLines" type="number" min="1" value="1"></label>
+          <label class="check"><input id="showLabels" type="checkbox" checked> Labels</label>
+          <label class="check"><input id="showTrendHigh" type="checkbox" checked> High Lines</label>
+          <label class="check"><input id="showTrendLow" type="checkbox" checked> Low Lines</label>
+          <label class="check"><input id="projectLines" type="checkbox" checked> Project</label>
+          <label class="check"><input id="removeCross" type="checkbox"> Remove on Cross</label>
+          <label class="check"><input id="showLiveZz" type="checkbox" checked> Live Zigzag</label>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Extra</h3>
+        <div class="form">
+          <label>MA Type
+            <select class="ctrl" id="maType"><option>None</option><option>SMA</option><option selected>EMA</option><option>SMMA (RMA)</option><option>WMA</option><option>VWMA</option></select>
+          </label>
+          <label>MA Length <input class="ctrl" id="maLen" type="number" min="1" value="25"></label>
+          <label class="check"><input id="heikin" type="checkbox"> Heikin Ashi</label>
+        </div>
+        <div class="hint">The uploaded Pine source contains EMA/ATR arrows, swing volume profile, optional heat map/PoC/zigzag, a smoothing MA, and HH/HL/LH/LL structure logic.</div>
+      </div>
+    </aside>
+  </div>
+  <div class="bottom"><span id="barCount">0 bars</span><span id="lastUpdate">—</span><span class="grow"></span><span>Volume profile uses provider volume/tick-count fallback when volume is unavailable.</span></div>
+</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  // Remember the API key only in this browser.
+  // It is never written into the repository/source code.
+  const savedApiKey = localStorage.getItem('td_chart_api_key');
+  if (savedApiKey) $('apiKey').value = savedApiKey;
+  const state = {
+    bars: [], rawBars: [], ws: null, live: false, symbol: 'XAU/USD', interval: '15min',
+    price: null, prevClose: null, tickerVolume: 0, lastTickBucket: null
+  };
+
+  const chart = LightweightCharts.createChart($('chart'), {
+    layout: { background: { color: '#0b0e11' }, textColor: '#9aa5b1' },
+    grid: { vertLines: { color: '#151b20' }, horzLines: { color: '#151b20' } },
+    rightPriceScale: { borderColor: '#29323a', scaleMargins: { top: 0.08, bottom: 0.10 } },
+    timeScale: { borderColor: '#29323a', timeVisible: true, secondsVisible: false, rightOffset: 5 },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    width: $('chart').clientWidth, height: $('chart').clientHeight
+  });
+  const candles = chart.addCandlestickSeries({
+    upColor: '#22c55e', downColor: '#ef4444',
+    borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+    wickUpColor: '#22c55e', wickDownColor: '#ef4444'
+  });
+  const volume = chart.addHistogramSeries({
+    priceFormat: { type: 'volume' }, priceScaleId: '', scaleMargins: { top: 0.86, bottom: 0 }
+  });
+  const emaFast = chart.addLineSeries({ lineWidth: 3, color: '#22c55e', priceLineVisible:false, lastValueVisible:false });
+  const emaSlow = chart.addLineSeries({ lineWidth: 2, color: '#22c55e', priceLineVisible:false, lastValueVisible:false });
+  const extraMA = chart.addLineSeries({ lineWidth: 1, color: '#facc15', priceLineVisible:false, lastValueVisible:false });
+
+  const overlay = $('overlay'), ctx = overlay.getContext('2d');
+  const resize = () => {
+    const r = $('chart').getBoundingClientRect();
+    overlay.width = Math.max(1, Math.floor(r.width * devicePixelRatio));
+    overlay.height = Math.max(1, Math.floor(r.height * devicePixelRatio));
+    overlay.style.width = r.width + 'px'; overlay.style.height = r.height + 'px';
+    ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+    chart.resize(r.width,r.height); drawOverlay();
+  };
+  new ResizeObserver(resize).observe($('chart'));
+
+  const intervalSec = iv => {
+    const map = {'1min':60,'5min':300,'15min':900,'30min':1800,'1h':3600,'2h':7200,'4h':14400,'8h':28800,'1day':86400};
+    return map[iv] || 900;
+  };
+  const tfLabel = iv => ({'1min':'1m','5min':'5m','15min':'15m','30min':'30m','1h':'1h','2h':'2h','4h':'4h','8h':'8h','1day':'1D'})[iv] || iv;
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const toast = msg => { $('toast').textContent = msg; $('toast').style.display='block'; clearTimeout(toast.t); toast.t=setTimeout(()=>{$('toast').style.display='none'},4200); };
+  const setStatus = (text, live=false) => { $('statusText').textContent=text; $('statusDot').className='dot'+(live?' live':''); };
+
+  function parseApiTime(x) {
+    if (x.timestamp) return Number(x.timestamp);
+    return Math.floor(Date.parse(x.datetime + 'Z') / 1000);
+  }
+  function normalizeCandle(r) {
+    return { time: parseApiTime(r), open:+r.open, high:+r.high, low:+r.low, close:+r.close, volume:+(r.volume || 0) };
+  }
+  function heikinAshi(rows) {
+    let prevOpen=null, prevClose=null;
+    return rows.map(r => {
+      const c=(r.open+r.high+r.low+r.close)/4;
+      const o=(prevOpen==null ? (r.open+r.close)/2 : (prevOpen+prevClose)/2);
+      const h=Math.max(r.high,o,c), l=Math.min(r.low,o,c);
+      prevOpen=o; prevClose=c;
+      return {...r,open:o,high:h,low:l,close:c};
+    });
+  }
+  function ema(data,len,key='close'){
+    const out = Array(data.length).fill(null); if(!data.length)return out;
+    const k=2/(len+1); let v=null;
+    for(let i=0;i<data.length;i++){ const x=data[i][key]; if(x==null)continue; v=(v==null?x:(x*k+v*(1-k))); if(i>=len-1) out[i]=v; }
+    return out;
+  }
+  function rma(data,len){
+    const out=Array(data.length).fill(null); let v=null, sum=0;
+    for(let i=0;i<data.length;i++){
+      const x=data[i]; if(i<len){sum+=x; if(i===len-1){v=sum/len;out[i]=v}}
+      else {v=(v*(len-1)+x)/len;out[i]=v}
+    } return out;
+  }
+  function atr(rows,len){
+    const tr=rows.map((r,i)=>i?Math.max(r.high-r.low,Math.abs(r.high-rows[i-1].close),Math.abs(r.low-rows[i-1].close)):r.high-r.low);
+    return rma(tr,len);
+  }
+  function sma(rows,len){
+    const out=Array(rows.length).fill(null), q=[]; let sum=0;
+    for(let i=0;i<rows.length;i++){q.push(rows[i].close);sum+=rows[i].close;if(q.length>len)sum-=q.shift();if(q.length===len)out[i]=sum/len;}return out;
+  }
+  function wma(rows,len){
+    const out=Array(rows.length).fill(null);
+    for(let i=len-1;i<rows.length;i++){let sw=0,s=0;for(let j=0;j<len;j++){const w=j+1;sw+=w;s+=rows[i-len+1+j].close*w}out[i]=s/sw}return out;
+  }
+  function vwma(rows,len){
+    const out=Array(rows.length).fill(null), q=[], vq=[]; let ps=0,pv=0;
+    for(let i=0;i<rows.length;i++){q.push(rows[i].close*rows[i].volume);vq.push(rows[i].volume);ps+=q.at(-1);pv+=vq.at(-1);if(q.length>len){ps-=q.shift();pv-=vq.shift()}if(q.length===len)out[i]=pv?ps/pv:null;}return out;
+  }
+
+  function pivots(rows, len) {
+    const highs=[], lows=[];
+    for(let i=len;i<rows.length-len;i++){
+      let h=true,l=true;
+      for(let j=i-len;j<=i+len;j++){ if(j===i)continue; if(rows[j].high>=rows[i].high)h=false; if(rows[j].low<=rows[i].low)l=false; }
+      if(h)highs.push({i,p:rows[i].high}); if(l)lows.push({i,p:rows[i].low});
+    }
+    return {highs,lows};
+  }
+
+  function highestIndex(rows, i, len, key) {
+    let idx=-1,val=-Infinity; for(let j=Math.max(0,i-len+1);j<=i;j++){if(rows[j][key]>val){val=rows[j][key];idx=j}} return idx;
+  }
+
+  function indicatorState(rows) {
+    const cfg = {
+      fast:+$('fastLen').value, slow:+$('slowLen').value, atrLen:+$('atrLen').value,
+      arrowDist:+$('arrowDist').value, swingLen:Math.max(10,+$('swingLen').value),
+      binAtr:+$('binAtr').value, majorLen:Math.max(1,+$('majorLen').value)
+    };
+    const ef=ema(rows,cfg.fast), es=ema(rows,cfg.slow), at=atr(rows,cfg.atrLen);
+    const fastLine=[], slowLine=[], maLine=[];
+    for(let i=0;i<rows.length;i++){
+      if(ef[i]!=null)fastLine.push({time:rows[i].time,value:ef[i]});
+      if(es[i]!=null)slowLine.push({time:rows[i].time,value:es[i]});
+    }
+    const mt=$('maType').value, ml=Math.max(1,+$('maLen').value);
+    const ma = mt==='None'?Array(rows.length).fill(null):mt==='SMA'?sma(rows,ml):mt==='EMA'?ema(rows,ml):mt==='SMMA (RMA)'?rma(rows.map(x=>x.close),ml):mt==='WMA'?wma(rows,ml):vwma(rows,ml);
+    for(let i=0;i<rows.length;i++)if(ma[i]!=null)maLine.push({time:rows[i].time,value:ma[i]});
+
+    const arrows=[];
+    for(let i=1;i<rows.length;i++){
+      if(ef[i-1]!=null&&es[i-1]!=null&&ef[i]!=null&&es[i]!=null&&at[i]!=null){
+        if(ef[i-1]<=es[i-1]&&ef[i]>es[i]) arrows.push({i,kind:'buy',p:rows[i-1].low-at[i]*cfg.arrowDist});
+        if(ef[i-1]>=es[i-1]&&ef[i]<es[i]) arrows.push({i,kind:'sell',p:rows[i-1].high+at[i]*cfg.arrowDist});
+      }
+    }
+    return {ef,es,at,fastLine,slowLine,maLine,arrows,cfg,piv:pivots(rows,cfg.majorLen)};
+  }
+
+  function loadSeriesToChart(rows, inds) {
+    candles.setData(rows.map(r=>({time:r.time,open:r.open,high:r.high,low:r.low,close:r.close})));
+    const volData=rows.map(r=>({time:r.time,value:(r.volume||1),color:r.close>=r.open?'rgba(34,197,94,.22)':'rgba(239,68,68,.22)'}));
+    volume.setData(volData);
+    emaFast.setData(inds.fastLine); emaSlow.setData(inds.slowLine); extraMA.setData(inds.maLine);
+    drawOverlay();
+    $('barCount').textContent=rows.length+' bars';
+    $('lastUpdate').textContent='Updated '+new Date().toLocaleTimeString();
+    $('infoSymbol').textContent=state.symbol;
+    $('infoInterval').textContent=tfLabel(state.interval);
+    if(rows.length){const a=rows[rows.length-1], b=rows[Math.max(0,rows.length-2)]; const ch=a.close-(b?.close??a.close);const pct=b?.close?(ch/b.close*100):0;
+      $('infoPrice').textContent=a.close.toFixed(a.close<10?5:2);
+      $('infoChange').textContent=(ch>=0?'+':'')+ch.toFixed(a.close<10?5:2)+' ('+(pct>=0?'+':'')+pct.toFixed(2)+'%)';
+      $('infoChange').className='value '+(ch>=0?'up':'down');
+    }
+    if(!state.live)chart.timeScale().fitContent();
+  }
+
+  function normalizedSymbol(s) {
+    const raw = (s || '').trim().toUpperCase().replace(/\s+/g,'');
+    if (raw === 'XAUUSD' || raw === 'GOLD' || raw === 'GOLD/USD') return 'XAU/USD';
+    if (raw === 'XAGUSD' || raw === 'SILVER') return 'XAG/USD';
+    return raw;
+  }
+
+  async function tdFetch(path, params = {}) {
+    const key = $('apiKey').value.trim();
+    if (!key) throw new Error('Missing Twelve Data API key.');
+    const u = new URL('https://api.twelvedata.com' + path);
+    Object.entries(params).forEach(([k,v]) => u.searchParams.set(k, v));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      // Twelve Data documents the Authorization-header method as the recommended API-key method.
+      const res = await fetch(u.toString(), {
+        method: 'GET',
+        headers: { 'Authorization': 'apikey ' + key, 'Accept': 'application/json' },
+        signal: controller.signal,
+        cache: 'no-store'
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { throw new Error('Twelve Data returned non-JSON data (HTTP '+res.status+').'); }
+      if (!res.ok || data.status === 'error' || data.code) {
+        const code = data.code ? ' ['+data.code+']' : '';
+        throw new Error((data.message || ('HTTP '+res.status)) + code);
+      }
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function showNetworkError(e) {
+    const msg = String(e && e.message || e);
+    if (location.protocol === 'file:') {
+      toast('Browser opened this HTML as file://. If Twelve Data is blocked by CORS, run it from localhost (the fixed package includes server.py).');
+    } else if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) {
+      toast('Network/CORS error while contacting Twelve Data. Use the included local server.');
+    } else {
+      toast(msg);
+    }
+  }
+
+  async function testApi() {
+    try {
+      setStatus('Testing…');
+      const symbol = normalizedSymbol($('symbol').value || 'XAUUSD');
+      $('symbol').value = symbol;
+      const j = await tdFetch('/quote', { symbol });
+      const p = Number(j.close ?? j.price);
+      setStatus('API OK', true);
+      if (Number.isFinite(p)) $('infoPrice').textContent = p.toFixed(p < 10 ? 5 : 2);
+      toast('Twelve Data API works for '+symbol+'.');
+      return true;
+    } catch(e) {
+      setStatus('API Error');
+      showNetworkError(e);
+      return false;
+    }
+  }
+
+  async function loadHistory() {
+    disconnectWS();
+    state.symbol=normalizedSymbol($('symbol').value||'XAUUSD');
+    $('symbol').value=state.symbol;
+    state.interval=$('interval').value;
+    setStatus('Loading…');
+    const outputsize=+$('historySize').value;
+    try{
+      const j=await tdFetch('/time_series',{
+        symbol:state.symbol,
+        interval:state.interval,
+        outputsize:outputsize,
+        timezone:'UTC',
+        order:'ASC'
+      });
+      if(!Array.isArray(j.values)) throw new Error('Twelve Data returned no candle values for '+state.symbol+'.');
+      let rows=j.values.map(normalizeCandle).sort((a,b)=>a.time-b.time);
+      if(rows.length < 2) throw new Error('Only '+rows.length+' candle was returned. Try a different interval or symbol.');
+      state.rawBars=rows;
+      state.bars=$('heikin').checked?heikinAshi(rows):rows.map(x=>({...x}));
+      const ind=indicatorState(state.bars); state.ind=ind;
+      loadSeriesToChart(state.bars,ind);
+      setStatus('Connected',true);
+      toast('Loaded '+state.bars.length+' candles for '+state.symbol+'.');
+      return true;
+    }catch(e){
+      state.rawBars=[];state.bars=[];state.ind=null;
+      candles.setData([]);volume.setData([]);emaFast.setData([]);emaSlow.setData([]);extraMA.setData([]);
+      $('barCount').textContent='0 bars';
+      setStatus('Error');
+      showNetworkError(e);
+      return false;
+    }
+  }
+
+  function connectWS() {
+    const key=$('apiKey').value.trim();
+    if(!key){toast('Enter your Twelve Data API key first.');return;}
+    disconnectWS();
+    state.live=true; setStatus('Connecting…');
+    let ws;
+    try { ws=new WebSocket('wss://ws.twelvedata.com/v1/quotes/price?apikey='+encodeURIComponent(key)); }
+    catch(e){state.live=false;toast('WebSocket could not be created: '+e.message);return;}
+    state.ws=ws;
+    ws.onopen=()=>{
+      setStatus('Live',true);
+      ws.send(JSON.stringify({action:'subscribe',params:{symbols:state.symbol}}));
+      toast('Live price stream connected.');
+    };
+    ws.onerror=()=>{
+      setStatus('WebSocket Error');
+      toast('Twelve Data WebSocket failed. Full WebSocket access is plan-dependent.');
+    };
+    ws.onclose=(ev)=>{
+      state.live=false;
+      if (ev && ev.code===1008) toast('Twelve Data rejected the WebSocket connection. Check API permissions/plan.');
+      setStatus('Disconnected');
+    };
+    ws.onmessage=evt=>{
+      let m; try{m=JSON.parse(evt.data)}catch{return}
+      if(m.event==='subscribe-status' && m.status==='error'){toast(m.message||'Subscription error');return;}
+      if(m.event==='price' || m.price!=null){
+        const px=+(m.price ?? m.data?.price); const ts=+(m.timestamp ?? m.data?.timestamp);
+        if(!Number.isFinite(px)||!Number.isFinite(ts))return;
+        state.price=px;
+        updateLiveBar(ts,px);
+      }
+    };
+  }
+  function disconnectWS(){if(state.ws){try{state.ws.close()}catch{} state.ws=null}state.live=false;}
+
+  function xForIndex(i){ const t=state.bars[i]?.time; return t==null?null:chart.timeScale().timeToCoordinate(t); }
+  function yForPrice(p){ return chart.priceScale('right').priceToCoordinate(p); }
+
+  function drawLine(x1,y1,x2,y2,color,width=1,dash=[]){
+    if([x1,y1,x2,y2].some(v=>v==null||!Number.isFinite(v)))return;
+    ctx.save();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dash);ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();ctx.restore();
+  }
+  function drawText(x,y,text,color,size=11,align='center'){
+    if(x==null||y==null)return;ctx.save();ctx.fillStyle=color;ctx.font='600 '+size+'px Inter,Arial';ctx.textAlign=align;ctx.textBaseline='middle';ctx.fillText(text,x,y);ctx.restore();
+  }
+
+  function volumeProfile(rows, start, end, atr200, mainColor) {
+    const bottom=Math.min(rows[start].low,rows[end].low), top=Math.max(rows[start].high,rows[end].high);
+    const step=Math.max((atr200||((top-bottom)/20))*+$('binAtr').value, (top-bottom)/60);
+    const count=Math.max(1,Math.min(80,Math.ceil((top-bottom)/step)||1));
+    const bins=Array.from({length:count},()=>0);
+    for(let i=start;i<=end;i++){
+      const c=rows[i].close, b=Math.floor((c-bottom)/Math.max(step,1e-12));
+      const k=Math.max(0,Math.min(count-1,b)); bins[k]+=rows[i].volume||1;
+    }
+    const mx=Math.max(...bins,1); let poc=0; bins.forEach((v,i)=>{if(v>bins[poc])poc=i});
+    const x0=xForIndex(start), x1=xForIndex(end);
+    if(x0==null||x1==null)return;
+    const maxWidth=Math.max(25,Math.abs(x1-x0)*0.45);
+    if($('showProfile').checked||$('heatMap').checked){
+      for(let k=0;k<count;k++){
+        const yTop=yForPrice(bottom+(k+1)*(top-bottom)/count), yBot=yForPrice(bottom+k*(top-bottom)/count);
+        const w=maxWidth*(bins[k]/mx); const left=Math.min(x0,x1); const right=left+w;
+        ctx.save();
+        const alpha=$('heatMap').checked ? (0.04+0.15*(bins[k]/mx)) : (0.08+0.20*(bins[k]/mx));
+        ctx.fillStyle = mainColor.replace('1)',alpha+')').replace('rgb','rgba');
+        ctx.fillRect(left,Math.min(yTop,yBot),Math.max(1,w),Math.max(1,Math.abs(yBot-yTop)));
+        ctx.restore();
+      }
+    }
+    if($('showPoc').checked){
+      const py=yForPrice(bottom+(poc+0.5)*(top-bottom)/count); drawLine(x0,py,x1,py,'#ef4444',2);
+    }
+  }
+
+  function drawOverlay(){
+    const w=$('chart').clientWidth,h=$('chart').clientHeight;
+    ctx.clearRect(0,0,w,h); if(!state.bars?.length)return;
+    const rows=state.bars, ind=state.ind||indicatorState(rows);
+    // EMA trend coloring matching the Pine condition
+    // Lightweight Charts line colors are changed per series is cumbersome, so the overlay reinforces trend.
+    // Buy/sell arrows
+    for(const a of ind.arrows||[]){
+      const x=xForIndex(a.i), y=yForPrice(a.p); if(x==null||y==null)continue;
+      ctx.save();ctx.fillStyle=a.kind==='buy'?'#22c55e':'#ef4444';ctx.beginPath();
+      if(a.kind==='buy'){ctx.moveTo(x,y+8);ctx.lineTo(x-8,y-4);ctx.lineTo(x+8,y-4)}
+      else {ctx.moveTo(x,y-8);ctx.lineTo(x-8,y+4);ctx.lineTo(x+8,y+4)}
+      ctx.closePath();ctx.fill();ctx.restore();
+    }
+
+    // HH/HL/LH/LL structure
+    const p=ind.piv, maxTL=Math.max(1,+$('maxTrendLines').value);
+    if($('showLabels').checked){
+      p.highs.forEach((s,i)=>{const prev=p.highs[i-1];const txt=prev?(s.p>prev.p?'HH':'LH'):'x';const col=!prev?'#94a3b8':s.p>prev.p?'#22c55e':'#ef4444';drawText(xForIndex(s.i),yForPrice(s.p)-10,txt,col,10)});
+      p.lows.forEach((s,i)=>{const prev=p.lows[i-1];const txt=prev?(s.p<prev.p?'LL':'HL'):'x';const col=!prev?'#94a3b8':s.p<prev.p?'#ef4444':'#22c55e';drawText(xForIndex(s.i),yForPrice(s.p)+10,txt,col,10)});
+    }
+    function trendLines(arr, highSide){
+      if(arr.length<2)return;
+      const qualified=[];for(let i=1;i<arr.length;i++){const a=arr[i-1],b=arr[i];const good=highSide?(b.p<=a.p):(b.p>=a.p);if(good)qualified.push([a,b]);}
+      qualified.slice(-maxTL).forEach(([a,b])=>{
+        let x1=xForIndex(a.i),y1=yForPrice(a.p),x2=xForIndex(b.i),y2=yForPrice(b.p);
+        if(x1==null||x2==null)return;
+        if($('projectLines').checked){
+          x2=w; const slope=(y2-y1)/(Math.max(1,xForIndex(b.i)-x1)); y2=y1+slope*(x2-x1);
+          const src=highSide?rows.at(-1).high:rows.at(-1).low;
+          const lastP=y2; if($('removeCross').checked){ if((highSide&&src>chart.priceScale('right').coordinateToPrice(lastP))||(!highSide&&src<chart.priceScale('right').coordinateToPrice(lastP)))return; }
+        }
+        drawLine(x1,y1,x2,y2,highSide?'rgba(239,68,68,.8)':'rgba(34,197,94,.8)',1,$('projectLines').checked?[]:[]);
+      });
+    }
+    if($('showTrendHigh').checked)trendLines(p.highs,true);
+    if($('showTrendLow').checked)trendLines(p.lows,false);
+
+    // Live/confirmed zigzag approximation
+    if($('showLiveZz').checked||$('showSwingZz').checked){
+      const pts=[]; const mix=[];
+      const all=[...p.highs.map(s=>({...s,isHigh:true})),...p.lows.map(s=>({...s,isHigh:false}))].sort((a,b)=>a.i-b.i);
+      for(const s of all){if(!mix.length||s.isHigh!==mix.at(-1).isHigh){mix.push(s)}else{if(s.isHigh?s.p>mix.at(-1).p:s.p<mix.at(-1).p)mix[mix.length-1]=s}}
+      for(let i=1;i<mix.length;i++){const a=mix[i-1],b=mix[i];drawLine(xForIndex(a.i),yForPrice(a.p),xForIndex(b.i),yForPrice(b.p),'rgba(148,163,184,.75)',1,[2,4]);}
+      if($('showLiveZz').checked&&mix.length){const last=mix.at(-1);const isHigh=last.isHigh;let ex=isHigh?rows.at(-1).low:rows.at(-1).high;let ei=rows.length-1;
+        for(let i=last.i;i<rows.length;i++){if(isHigh&&rows[i].low<ex){ex=rows[i].low;ei=i} if(!isHigh&&rows[i].high>ex){ex=rows[i].high;ei=i}}
+        drawLine(xForIndex(last.i),yForPrice(last.p),xForIndex(ei),yForPrice(ex),'rgba(148,163,184,.55)',1,[5,4]);
+      }
+    }
+
+    // Swing volume profile for the latest major leg
+    const sl=Math.max(10,+$('swingLen').value);
+    if(rows.length>sl+5){
+      let hi=-1,lo=-1;
+      for(let i=Math.max(0,rows.length-sl);i<rows.length;i++){ if(hi<0||rows[i].high>rows[hi].high)hi=i; if(lo<0||rows[i].low<rows[lo].low)lo=i; }
+      if(hi>=0&&lo>=0&&hi!==lo){
+        const atr200=atr(rows,200).at(-1)||Math.abs(rows[hi].high-rows[lo].low)/20;
+        volumeProfile(rows,Math.min(hi,lo),Math.max(hi,lo),atr200, rows.at(-1).close>=rows.at(-1).open?'rgba(34,197,94,1)':'rgba(249,115,22,1)');
+      }
+    }
+  }
+
+  // Keep overlay aligned during scroll/zoom/crosshair movement.
+  chart.timeScale().subscribeVisibleLogicalRangeChange(drawOverlay);
+  chart.subscribeCrosshairMove(drawOverlay);
+
+  $('apiKey').addEventListener('change', () => {
+    const v = $('apiKey').value.trim();
+    if (v) localStorage.setItem('td_chart_api_key', v);
+    else localStorage.removeItem('td_chart_api_key');
+  });
+  $('loadBtn').onclick=loadHistory;
+  $('testBtn').onclick=testApi;
+  $('liveBtn').onclick=async()=>{ if(!state.bars.length){ const ok=await loadHistory(); if(!ok)return; } connectWS(); };
+  $('fitBtn').onclick=()=>chart.timeScale().fitContent();
+  $('resetBtn').onclick=()=>{chart.timeScale().resetTimeScale();chart.priceScale('right').applyOptions({autoScale:true});chart.timeScale().fitContent();};
+  $('heikin').onchange=()=>{ if(state.rawBars.length){state.bars=$('heikin').checked?heikinAshi(state.rawBars):state.rawBars.map(x=>({...x}));state.ind=indicatorState(state.bars);loadSeriesToChart(state.bars,state.ind)}};
+  document.querySelectorAll('.tf').forEach(b=>b.onclick=()=>{ $('interval').value=b.dataset.tf; document.querySelectorAll('.tf').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadHistory(); });
+  ['fastLen','slowLen','atrLen','arrowDist','swingLen','binAtr','majorLen','maxTrendLines','showLabels','showTrendHigh','showTrendLow','projectLines','removeCross','showLiveZz','showProfile','heatMap','showPoc','showSwingZz','maType','maLen'].forEach(id=>{
+    const el=$(id); el.addEventListener('change',()=>{if(state.bars.length){state.ind=indicatorState(state.bars);loadSeriesToChart(state.bars,state.ind)}});
+  });
+  window.addEventListener('beforeunload',disconnectWS);
+  resize();
+})();
+</script>
+</body>
+</html>
