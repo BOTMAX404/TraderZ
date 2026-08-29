@@ -478,7 +478,7 @@
   function disconnectWS(){if(state.ws){try{state.ws.close()}catch{} state.ws=null}state.live=false;}
 
   function xForIndex(i){ const t=state.bars[i]?.time; return t==null?null:chart.timeScale().timeToCoordinate(t); }
-  function yForPrice(p){ return chart.priceScale('right').priceToCoordinate(p); }
+  function yForPrice(p){ return candles.priceToCoordinate(p); }
 
   function drawLine(x1,y1,x2,y2,color,width=1,dash=[]){
     if([x1,y1,x2,y2].some(v=>v==null||!Number.isFinite(v)))return;
@@ -547,7 +547,10 @@
         if($('projectLines').checked){
           x2=w; const slope=(y2-y1)/(Math.max(1,xForIndex(b.i)-x1)); y2=y1+slope*(x2-x1);
           const src=highSide?rows.at(-1).high:rows.at(-1).low;
-          const lastP=y2; if($('removeCross').checked){ if((highSide&&src>chart.priceScale('right').coordinateToPrice(lastP))||(!highSide&&src<chart.priceScale('right').coordinateToPrice(lastP)))return; }
+          const lastP=y2; const projectedPrice=candles.coordinateToPrice(lastP);
+          if($('removeCross').checked && projectedPrice!=null){
+            if((highSide&&src>projectedPrice)||(!highSide&&src<projectedPrice)) return;
+          }
         }
         drawLine(x1,y1,x2,y2,highSide?'rgba(239,68,68,.8)':'rgba(34,197,94,.8)',1,$('projectLines').checked?[]:[]);
       });
