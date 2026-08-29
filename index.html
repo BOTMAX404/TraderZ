@@ -104,7 +104,7 @@
             <input class="ctrl" id="apiKey" type="password" placeholder="Paste your Twelve Data API key" />
           </label>
           <label>History
-            <select class="ctrl" id="historySize"><option value="800">800</option><option value="1500" selected>1500</option><option value="3000">3000</option></select>
+            <select class="ctrl" id="historySize"><option value="500">500</option><option value="700" selected>700</option><option value="1000">1000</option><option value="1500">1500</option></select>
           </label>
           <label>Source
             <select class="ctrl" id="sourceMode"><option value="xau">Forex / Metals</option><option value="stocks">Stocks</option></select>
@@ -187,11 +187,10 @@
     borderUpColor: '#22c55e', borderDownColor: '#ef4444',
     wickUpColor: '#22c55e', wickDownColor: '#ef4444'
   });
-  const volume = chart.addHistogramSeries({
-    priceFormat: { type: 'volume' }, priceScaleId: '', scaleMargins: { top: 0.86, bottom: 0 }
-  });
-  const emaFast = chart.addLineSeries({ lineWidth: 3, color: '#22c55e', priceLineVisible:false, lastValueVisible:false });
-  const emaSlow = chart.addLineSeries({ lineWidth: 2, color: '#22c55e', priceLineVisible:false, lastValueVisible:false });
+  const emaFastBull = chart.addLineSeries({ lineWidth: 3, color: '#22c55e', priceLineVisible:false, lastValueVisible:false });
+  const emaFastBear = chart.addLineSeries({ lineWidth: 3, color: '#ef4444', priceLineVisible:false, lastValueVisible:false });
+  const emaSlowBull = chart.addLineSeries({ lineWidth: 2, color: '#22c55e', priceLineVisible:false, lastValueVisible:false });
+  const emaSlowBear = chart.addLineSeries({ lineWidth: 2, color: '#ef4444', priceLineVisible:false, lastValueVisible:false });
   const extraMA = chart.addLineSeries({ lineWidth: 1, color: '#facc15', priceLineVisible:false, lastValueVisible:false });
 
   const overlay = $('overlay'), ctx = overlay.getContext('2d');
@@ -282,10 +281,16 @@
       binAtr:+$('binAtr').value, majorLen:Math.max(1,+$('majorLen').value)
     };
     const ef=ema(rows,cfg.fast), es=ema(rows,cfg.slow), at=atr(rows,cfg.atrLen);
-    const fastLine=[], slowLine=[], maLine=[];
+    const fastBull=[], fastBear=[], slowBull=[], slowBear=[], maLine=[];
     for(let i=0;i<rows.length;i++){
-      if(ef[i]!=null)fastLine.push({time:rows[i].time,value:ef[i]});
-      if(es[i]!=null)slowLine.push({time:rows[i].time,value:es[i]});
+      if(ef[i]!=null){
+        const bull = es[i]!=null ? ef[i]>=es[i] : true;
+        (bull ? fastBull : fastBear).push({time:rows[i].time,value:ef[i]});
+      }
+      if(es[i]!=null){
+        const bull = ef[i]!=null ? ef[i]>=es[i] : true;
+        (bull ? slowBull : slowBear).push({time:rows[i].time,value:es[i]});
+      }
     }
     const mt=$('maType').value, ml=Math.max(1,+$('maLen').value);
     const ma = mt==='None'?Array(rows.length).fill(null):mt==='SMA'?sma(rows,ml):mt==='EMA'?ema(rows,ml):mt==='SMMA (RMA)'?rma(rows.map(x=>x.close),ml):mt==='WMA'?wma(rows,ml):vwma(rows,ml);
@@ -298,14 +303,15 @@
         if(ef[i-1]>=es[i-1]&&ef[i]<es[i]) arrows.push({i,kind:'sell',p:rows[i-1].high+at[i]*cfg.arrowDist});
       }
     }
-    return {ef,es,at,fastLine,slowLine,maLine,arrows,cfg,piv:pivots(rows,cfg.majorLen)};
+    return {ef,es,at,fastBull,fastBear,slowBull,slowBear,maLine,arrows,cfg,piv:pivots(rows,cfg.majorLen)};
   }
 
   function loadSeriesToChart(rows, inds) {
     candles.setData(rows.map(r=>({time:r.time,open:r.open,high:r.high,low:r.low,close:r.close})));
     const volData=rows.map(r=>({time:r.time,value:(r.volume||1),color:r.close>=r.open?'rgba(34,197,94,.22)':'rgba(239,68,68,.22)'}));
-    volume.setData(volData);
-    emaFast.setData(inds.fastLine); emaSlow.setData(inds.slowLine); extraMA.setData(inds.maLine);
+    emaFastBull.setData(inds.fastBull); emaFastBear.setData(inds.fastBear);
+    emaSlowBull.setData(inds.slowBull); emaSlowBear.setData(inds.slowBear);
+    extraMA.setData(inds.maLine);
     drawOverlay();
     $('barCount').textContent=rows.length+' bars';
     $('lastUpdate').textContent='Updated '+new Date().toLocaleTimeString(); $('dataSource').textContent='REST: Twelve Data';
@@ -432,7 +438,7 @@
       return true;
     }catch(e){
       state.rawBars=[];state.bars=[];state.ind=null;
-      candles.setData([]);volume.setData([]);emaFast.setData([]);emaSlow.setData([]);extraMA.setData([]);
+      candles.setData([]);emaFastBull.setData([]);emaFastBear.setData([]);emaSlowBull.setData([]);emaSlowBear.setData([]);extraMA.setData([]);
       $('barCount').textContent='0 bars';
       setStatus('Error');
       showNetworkError(e);
@@ -488,33 +494,101 @@
     if(x==null||y==null)return;ctx.save();ctx.fillStyle=color;ctx.font='600 '+size+'px Inter,Arial';ctx.textAlign=align;ctx.textBaseline='middle';ctx.fillText(text,x,y);ctx.restore();
   }
 
-  function volumeProfile(rows, start, end, atr200, mainColor) {
-    const bottom=Math.min(rows[start].low,rows[end].low), top=Math.max(rows[start].high,rows[end].high);
-    const step=Math.max((atr200||((top-bottom)/20))*+$('binAtr').value, (top-bottom)/60);
-    const count=Math.max(1,Math.min(80,Math.ceil((top-bottom)/step)||1));
-    const bins=Array.from({length:count},()=>0);
-    for(let i=start;i<=end;i++){
-      const c=rows[i].close, b=Math.floor((c-bottom)/Math.max(step,1e-12));
-      const k=Math.max(0,Math.min(count-1,b)); bins[k]+=rows[i].volume||1;
-    }
-    const mx=Math.max(...bins,1); let poc=0; bins.forEach((v,i)=>{if(v>bins[poc])poc=i});
-    const x0=xForIndex(start), x1=xForIndex(end);
-    if(x0==null||x1==null)return;
-    const maxWidth=Math.max(25,Math.abs(x1-x0)*0.45);
-    if($('showProfile').checked||$('heatMap').checked){
-      for(let k=0;k<count;k++){
-        const yTop=yForPrice(bottom+(k+1)*(top-bottom)/count), yBot=yForPrice(bottom+k*(top-bottom)/count);
-        const w=maxWidth*(bins[k]/mx); const left=Math.min(x0,x1); const right=left+w;
-        ctx.save();
-        const alpha=$('heatMap').checked ? (0.04+0.15*(bins[k]/mx)) : (0.08+0.20*(bins[k]/mx));
-        ctx.fillStyle = mainColor.replace('1)',alpha+')').replace('rgb','rgba');
-        ctx.fillRect(left,Math.min(yTop,yBot),Math.max(1,w),Math.max(1,Math.abs(yBot-yTop)));
-        ctx.restore();
+  function rgba(hex, alpha){
+    const h=hex.replace('#','');
+    const n=parseInt(h.length===3?h.split('').map(x=>x+x).join(''):h,16);
+    return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${alpha})`;
+  }
+
+  function buildSwingLegs(rows, swingLen){
+    const legs=[];
+    let direction=null, highIdx=0, lowIdx=0;
+    for(let i=swingLen;i<rows.length;i++){
+      const hh=highestIndex(rows,i,swingLen,'high');
+      const ll=highestIndex(rows,i,swingLen,'low');
+      if(hh===i && direction!=='down'){
+        direction='down';
+        if(i>0 && lowIdx<i) legs.push({start:Math.min(lowIdx,i),end:Math.max(lowIdx,i),down:true});
+        highIdx=i;
       }
+      if(ll===i && direction!=='up'){
+        direction='up';
+        if(i>0 && highIdx<i) legs.push({start:Math.min(highIdx,i),end:Math.max(highIdx,i),down:false});
+        lowIdx=i;
+      }
+      if(hh===i) highIdx=i;
+      if(ll===i) lowIdx=i;
     }
+    return legs.filter(x=>x.end>x.start);
+  }
+
+  function volumeProfile(rows, start, end, atr200, mainColor){
+    if(end<=start)return;
+    const swingBottom=Math.min(rows[start].low,rows[end].low);
+    const swingTop=Math.max(rows[start].high,rows[end].high);
+    const range=Math.max(swingTop-swingBottom,1e-8);
+    const step=Math.max((atr200||range/24)*+$('binAtr').value, range/70);
+    const count=Math.max(8,Math.min(42,Math.ceil(range/step)));
+    const bins=Array.from({length:count},()=>({v:0,b:0,s:0}));
+    for(let i=start;i<=end;i++){
+      const p=rows[i].close, k=Math.max(0,Math.min(count-1,Math.floor((p-swingBottom)/range*count)));
+      const v=rows[i].volume||1;
+      bins[k].v+=v;
+      if(rows[i].close>=rows[i].open) bins[k].b+=v; else bins[k].s+=v;
+    }
+    const mx=Math.max(...bins.map(x=>x.v),1);
+    let poc=0;for(let i=1;i<count;i++)if(bins[i].v>bins[poc].v)poc=i;
+
+    const xStart=xForIndex(start), xEnd=xForIndex(end);
+    if(xStart==null||xEnd==null)return;
+
+    // The Pine version grows the profile from the earlier swing index toward the later swing.
+    const profileSide=Math.min(xStart,xEnd);
+    const legWidth=Math.max(30,Math.abs(xEnd-xStart));
+    const maxWidth=legWidth*0.85;
+
+    for(let k=0;k<count;k++){
+      const y1=yForPrice(swingBottom+(k/range*range)/count); // kept for clarity
+      const lo=swingBottom+(k/count)*range;
+      const hi=swingBottom+((k+1)/count)*range;
+      const topY=yForPrice(hi), botY=yForPrice(lo);
+      if(topY==null||botY==null)continue;
+      const w=maxWidth*(bins[k].v/mx);
+      const fillAlpha=$('heatMap').checked ? 0.12+0.22*(bins[k].v/mx) : 0.13+0.25*(bins[k].v/mx);
+      const left=profileSide;
+      const right=left+w;
+
+      ctx.save();
+      ctx.fillStyle=rgba(mainColor,fillAlpha);
+      ctx.fillRect(left,Math.min(topY,botY),Math.max(1,right-left),Math.max(1,Math.abs(botY-topY)));
+      ctx.strokeStyle=rgba(mainColor,0.9);
+      ctx.lineWidth=1;
+      ctx.strokeRect(left,Math.min(topY,botY),Math.max(1,right-left),Math.max(1,Math.abs(botY-topY)));
+      ctx.restore();
+    }
+
     if($('showPoc').checked){
-      const py=yForPrice(bottom+(poc+0.5)*(top-bottom)/count); drawLine(x0,py,x1,py,'#ef4444',2);
+      const pocPrice=swingBottom+((poc+0.5)/count)*range;
+      const py=yForPrice(pocPrice);
+      drawLine(profileSide,py,Math.min(w,profileSide+maxWidth+legWidth*.18),py,'#ef4444',2);
     }
+
+    // Swing-volume summary similar to the Pine tooltip/label, but kept compact.
+    const total=bins.reduce((a,x)=>a+x.v,0);
+    const buy=bins.reduce((a,x)=>a+x.b,0);
+    const sell=bins.reduce((a,x)=>a+x.s,0);
+    const delta=total?(buy-sell)/total*100:0;
+    const labelX=Math.min(w-80,profileSide+maxWidth+8);
+    const labelY=yForPrice((swingBottom+swingTop)/2);
+    drawText(labelX,labelY,`T ${formatVol(total)}  B ${formatVol(buy)}  S ${formatVol(sell)}  D ${delta.toFixed(0)}%`,
+             '#d7dee6',9,'left');
+  }
+
+  function formatVol(v){
+    if(v>=1e9)return (v/1e9).toFixed(2)+'B';
+    if(v>=1e6)return (v/1e6).toFixed(2)+'M';
+    if(v>=1e3)return (v/1e3).toFixed(2)+'K';
+    return Math.round(v).toString();
   }
 
   function drawOverlay(){
@@ -570,15 +644,15 @@
       }
     }
 
-    // Swing volume profile for the latest major leg
+    // Historical swing volume profiles: keep a few completed legs, matching the reference.
     const sl=Math.max(10,+$('swingLen').value);
-    if(rows.length>sl+5){
-      let hi=-1,lo=-1;
-      for(let i=Math.max(0,rows.length-sl);i<rows.length;i++){ if(hi<0||rows[i].high>rows[hi].high)hi=i; if(lo<0||rows[i].low<rows[lo].low)lo=i; }
-      if(hi>=0&&lo>=0&&hi!==lo){
-        const atr200=atr(rows,200).at(-1)||Math.abs(rows[hi].high-rows[lo].low)/20;
-        volumeProfile(rows,Math.min(hi,lo),Math.max(hi,lo),atr200, rows.at(-1).close>=rows.at(-1).open?'rgba(34,197,94,1)':'rgba(249,115,22,1)');
-      }
+    const legs=buildSwingLegs(rows,sl).slice(-4);
+    const atr200=atr(rows,200).at(-1)||0;
+    if($('showProfile').checked||$('heatMap').checked){
+      legs.forEach(leg=>{
+        const col=leg.down?'#f59e0b':'#00e676';
+        volumeProfile(rows,leg.start,leg.end,atr200,col);
+      });
     }
   }
 
